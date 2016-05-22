@@ -1,0 +1,13 @@
+!include config.nmake
+
+$(TARGET): $(OBJ_FILES)
+	$(LD) $(LDFLAGS) $(OBJ_FILES) /OUT:$(TARGET) $(LIBS)
+
+.cpp.obj:
+	$(CC) $(CFLAGS) $<
+
+clean:
+	$(RM) *.obj *.w32 *.def *.exp
+
+.PHONY: clean
+

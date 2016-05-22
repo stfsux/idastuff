@@ -1,0 +1,48 @@
+Show prefix '0x' instead of suffixe 'h'
+======================================================================
+
+Open pc.w32  with IDA/peview.  Locate LPH  structure, go  to LPH+0x1C.
+Follow the  address. You should  see asm directives near  this address
+(e.g. db,  dw, org,  etc.). Get  the file offset  of this  address and
+change the 3-bit  of the first dword  begining at bit 9.  The mask for
+formating hex number is:
+
+0b00000000 00000000 00001110 00000000.
+
+You must have something like:
+
+0bXXXXXXXX XXXXXXXX XXXX011X XXXXXXXX. (X: dont give a shit.)
+
+Open pc.w32 with your favorite hex  editor, go to that file offset and
+patch this mofo. Same shit for pc.w64 or any other proc mod.
+
+Leading zeroes by default
+======================================================================
+
+There are 2 ways for showing leading zeroes by default
+
+Console
+----------------------------------------------------------------------
+
+The shitty way, execute this shit in console:
+SetCharPrm (INF_GENFLAGS, INFFL_LZERO)
+Then reload the input file.
+
+
+Patch
+----------------------------------------------------------------------
+
+We need to patch the  setup of idainfo structure (s_genflags) exported
+and set by ida.wll (symbol 'inf').
+
+Setup  a memory  breakpoint at  (char*)((uint32_t)inf+0x53). Then  run
+IDA, do  some shit with  it. Breakpoint  should be triggered  when you
+load a new analysis. This flag is  a byte (s_genflags) and it's set by
+ida.wll. The  weird thing is  that ida.wll  setup 2 flags  (s_null and
+s_genflags) at the  same time by writting a word  (0x0201). Patch this
+mofo  with 0x301  and we're  done.  For the  lazy dudes,  we can  also
+retreive the  routine by searching the  string 'IDA_AUTO_UPGRADE_IDB'.
+Just scroll down and search for mov [esi+something], 0x201 and here we
+go.
+
+This flag is saved in your idb so it will not affect any existing idb.

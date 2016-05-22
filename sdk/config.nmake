@@ -1,0 +1,30 @@
+
+# toolchain
+CC=cl.exe
+LD=link.exe
+RM=del
+
+# toolchain's config
+CFLAGS_GLOBAL=/MT
+CFLAGS=$(CFLAGS_GLOBAL) /D__NT__ /D__IDP__ /I$(IDASDK_INC) /I$(IDASDK_ROOT)\module\ /c
+LIBS=kernel32.lib ida.lib pro.lib
+LDFLAGS=/LIBPATH:$(IDASDK_LIB) /DLL /LARGEADDRESSAWARE /DYNAMICBASE /BASE:0x13000000 /INCREMENTAL:NO /STUB:$(IDASDK_ROOT)\module\stub
+
+# plugins
+# CFLAGS_PLUGINS=$(CFLAGS_GLOBAL)
+# LDFLAGS_PLUGINS=
+
+
+# paths 
+IDASDK_ROOT=C:\Users\bite\Desktop\tools\idasdk66
+IDASDK_INC=$(IDASDK_ROOT)\include
+IDASDK_LIB=$(IDASDK_ROOT)\lib\x86_win_vc_32
+IDASDK_BIN=$(IDASDK_ROOT)\bin
+IDASDK_LOADERS=$(IDASDK_BIN)\loaders
+IDASDK_PLUGINS=$(IDASDK_BIN)\plugins
+IDASDK_PROCS=$(IDASDK_BIN)\procs
+
+#
+TARGET=
+SRC_FILES=
+OBJ_FILES=
