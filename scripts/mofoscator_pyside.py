@@ -2,25 +2,24 @@
 # movfuscator (04/02/16)
 #  identified routines:
 #    - arithmetic: add, sub, div, mod, mul.
-#    - logic: xor
+#    - logic: xor, or, and
 #    - branch: jmp_gti, jmp_gtu, jmp_lei, jmp_leu,
 #              jmp_lti, jmp_gei, jmp_neu, jmp_geu,
-#              jmp_equ, jmp_ltu, jmp_jumpv
+#              jmp_equ, jmp_ltu, jmp_jumpv, call external
+#    - transfer: mov Rx, select_data
+#    - export as txt
 #  todo:
-#    - logic: and, or, not
-#    - branch: call external
-#    - transfer: mov Rx, select_data, store_data
-#  other shit todo:
-#    - move the cursor to the selected item
+#    - transfer: store_data
+#    - local variables and parameters
 import idaapi
 import idautils
 from PySide import QtGui, QtCore
 
 align = 16
 
-mofo_data_start = 0x0807BC00
-mofo_code_start = 0x08048744
-mofo_code_end   = 0x0807A859
+mofo_data_start = 0x0
+mofo_code_start = 0x0
+mofo_code_end   = 0x0
 
 MDAL_SIZE_BYTE  = 1
 MDAL_SIZE_WORD  = 2
@@ -33,7 +32,6 @@ SOFT_F_REGS     = 2
 SOFT_D_REGS     = 2
 MOV_FLOW        = 1
 MOV_OFFSET      = 0x80000000
-MOV_EXTERN      = 0
 STACK_EX_THRESH = 128*4
 
 mofo_funcs      = dict()
@@ -433,7 +431,45 @@ xref_code_sign = [
       [REL_NEXT, 24, 0, OP_DST]
     ],
     6,
-    24
+    25
+  ],
+  [
+    'alu_bor',
+    'alu_bor8',
+    [
+      [REL_PREV, 4, OP_VAL, 1, 0],
+      [REL_PREV, 3, OP_VAL, 1, 0],
+      [REL_PREV, 4, OP_REG, 0, 'eax'],
+      [REL_PREV, 4, OP_REG, 0, 'edx'],
+      [REL_PREV, 6, OP_XREF, 0, 'alu_x'],
+      [REL_PREV, 5, OP_XREF, 0, 'alu_y'],
+    ],
+    [
+      [REL_PREV, 6, 1, OP_SRC],
+      [REL_PREV, 5, 1, OP_SRC],
+      [REL_NEXT, 25, 0, OP_DST]
+    ],
+    6,
+    25,
+  ],
+  [
+    'alu_band',
+    'alu_band8',
+    [
+      [REL_PREV, 4, OP_VAL, 1, 0],
+      [REL_PREV, 3, OP_VAL, 1, 0],
+      [REL_PREV, 4, OP_REG, 0, 'eax'],
+      [REL_PREV, 4, OP_REG, 0, 'edx'],
+      [REL_PREV, 6, OP_XREF, 0, 'alu_x'],
+      [REL_PREV, 5, OP_XREF, 0, 'alu_y'],
+    ],
+    [
+      [REL_PREV, 6, 1, OP_SRC],
+      [REL_PREV, 5, 1, OP_SRC],
+      [REL_NEXT, 25, 0, OP_DST]
+    ],
+    6,
+    25,
   ],
   [
     'alu_add',
@@ -479,10 +515,22 @@ xref_code_sign = [
       [REL_NEXT, 5, OP_XREF, 1, 'stack_ptr'],
     ],
     [
-      [REL_CURR, 0, 1, OP_SRC],
+      [REL_PREV, 1, 1, OP_SRC],
     ],
     1,
     14,
+  ],
+  [
+    'select_data',
+    'data_p',
+    [
+      [REL_NEXT, 1, OP_XREF, 1, 'sel_data']
+    ],
+    [
+      [REL_CURR, 0, 1, OP_SRC]
+    ],
+    0,
+    2
   ],
   [
     'execution_off',
@@ -572,30 +620,30 @@ def mofo_detect_extern_mode ():
 def mofo_get_reg_wr_ea (ea, regname, MAXDEPTH=50):
   current_ea = ea
   for n in range (1, MAXDEPTH):
+    current_ea = mofo_get_prev_insn (current_ea, 1)
     if mofo_is_func (current_ea) != None:
       return 0xFFFFFFFF
     if GetOpType (current_ea, 0) == o_reg:
       if regname.lower() == "eax":
         r = GetOpnd (current_ea, 0).lower ()
-        if r == "ax" or r == "al" or r == 'ah':
+        if r == "ax" or r == "al" or r == 'ah' or r == 'eax':
           return current_ea
       elif regname.lower () == "ebx":
         r = GetOpnd (current_ea, 0).lower ()
-        if r == "bx" or r == "bl" or r == 'bh':
+        if r == "bx" or r == "bl" or r == 'bh' or r == 'ebx':
           return current_ea
       elif regname.lower () == "ecx":
         r = GetOpnd (current_ea, 0).lower ()
-        if r == "cx" or r == "cl" or r == 'ch':
+        if r == "cx" or r == "cl" or r == 'ch' or r == 'ecx':
           return current_ea
       elif regname.lower () == "edx":
         r = GetOpnd (current_ea, 0).lower ()
-        if r == "dx" or r == "dl" or r == 'dh':
+        if r == "dx" or r == "dl" or r == 'dh' or r == 'edx':
           return current_ea
       else:
           return 0xFFFFFFFF
       if GetOpnd (current_ea, 0).lower() == regname.lower():
         return current_ea
-    current_ea = mofo_get_prev_insn (current_ea, 1)
   return 0xFFFFFFFF
 
 # -------------------------------------------------------------------
@@ -970,9 +1018,9 @@ def mofo_data_anal ():
   currpos = mofo_align (currpos, 16)
   for n in range (0, 4): 
     if mofo_byte_has_xref (currpos + n * 4) == 1:
-      mofo_data.append (['b%01d (used)' % n, currpos + n*4])
+      mofo_data.append (['b%01d (used)' % n, currpos])
     else:
-      mofo_data.append (['b%01d (unused)' % n, currpos + n*4])
+      mofo_data.append (['b%01d (unused)' % n, currpos])
     currpos = mofo_make_data (currpos, 'b%01d' % n, MDAL_SIZE_DWORD, 1)
 
   currpos = mofo_align (currpos, 16)
@@ -1236,6 +1284,113 @@ def mofo_code_anal ():
               block_args.append (GetOpnd (arg_ea, args[2]))
           mofo_update_funcs (cs[0], block_start, block_end, block_args)
         
+# -------------------------------------------------------------------
+def mofo_search_stack ():
+  refs = DataRefsTo (get_name_ea (NT_NONE, 'frame_ptr'))
+  pushpop_addr = get_name_ea (NT_NONE, 'pushpop')
+  stack_addr = get_name_ea (NT_NONE, 'stack_00000000')
+  push_val = stack_addr - pushpop_addr - 4
+  pop_val  = stack_addr - pushpop_addr + 4
+  push_str = '%x' % push_val
+  pop_str = '%x' % pop_val
+  nbytes = 0
+  for r in refs:
+    if mofo_is_func (r) != None:
+      continue
+    current_ea = mofo_get_next_insn (r, 1)
+    nbytes = 4
+    opnd = GetOpnd (current_ea, 1)
+    opnd = opnd.lower ()
+    if opnd.find (push_str) != -1:
+      while True:
+        current_ea = mofo_get_next_insn (current_ea, 1)
+        opnd = GetOpnd (current_ea, 1)
+        opnd = opnd.lower ()
+        if opnd.find (push_str) != -1:
+          nbytes = nbytes + 4
+        else:
+          break
+      mofo_update_funcs ('alu_sub', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
+    elif opnd.find (pop_str) != -1:
+      while True:
+        current_ea = mofo_get_next_insn (current_ea, 1)
+        opnd = GetOpnd (current_ea, 1)
+        opnd = opnd.lower ()
+        if opnd.find (pop_str) != -1:
+          nbytes = nbytes + 4
+        else:
+          break
+      mofo_update_funcs ('alu_add', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
+
+# -------------------------------------------------------------------
+def mofo_search_movreg ():
+  for n in range (0, SOFT_I_REGS):
+    soft_reg_ea = get_name_ea (NT_NONE, 'R%1d' % n)
+    refs = DataRefsTo (soft_reg_ea)
+    for r in refs:
+      if mofo_is_func (r) != None:
+        continue
+      start = r
+      end = mofo_get_next_insn (r, 1)
+      if GetOpType (r, 1) == o_imm:
+        op1 = GetOpnd (r, 1)
+        mofo_update_funcs ('mov', r, r, ['R%1d' % n, op1])
+      elif GetOpType (r, 1) == o_reg:
+        op1 = GetOpnd (r, 1)
+        opaxx = mofo_get_reg_wr_ea (r, op1)
+        if opaxx != 0xFFFFFFFF:
+          if GetOpType (opaxx, 1) != o_reg:
+            mofo_update_funcs ('mov', opaxx, end, ['R%1d' % n, GetOpnd (opaxx, 1)])
+        else:
+          mofo_update_funcs ('mov', r, end, ['R%1d' % n, GetOpnd (r, 1)])
+
+# -------------------------------------------------------------------
+def mofo_search_call_extern ():
+  # MOV_EXTERN = 0
+  current_ea = mofo_code_start
+  while current_ea < mofo_code_end:
+    mnem = GetMnem (current_ea).lower()
+    if mnem == "jz" or mnem == "je":
+      start = mofo_get_prev_insn (current_ea, 2)
+      end = current_ea
+      symname = GetOpnd(LocByName(GetOpnd (current_ea, 0)), 0)
+      symname = symname.replace ('ds:', '')
+      mofo_update_funcs (symname, start, end, ['']) 
+    current_ea = mofo_get_next_insn (current_ea, 1)
+  # MOV_EXTERN = 1
+  current_ea = mofo_code_start
+  addr_fault = get_name_ea (NT_NONE, 'fault')
+  refs = DataRefsTo (addr_fault)
+  for r in refs:
+    start = 0
+    end = 0
+    args = list ()
+
+    start = mofo_get_prev_insn (r, 3)
+    end = mofo_get_next_insn (r, 1)
+    symname = GetOpnd (GetOperandValue (mofo_get_next_insn (start, 1), 1), 0)
+    symname = symname.replace ('ds:', '')
+    mofo_update_funcs (symname, start, end, [''])
+
+# -------------------------------------------------------------------
+def mofo_code_anal_ex ():
+  mofo_search_call_extern ()
+  mofo_search_stack ()
+  mofo_search_movreg ()
+
+# -------------------------------------------------------------------
+def mofo_sel_block (start, end):
+  current_ea = start
+  while current_ea < end:
+    idaapi.set_item_color (current_ea, 0xFF0000)
+    current_ea = mofo_get_next_insn (current_ea, 1)
+
+# -------------------------------------------------------------------
+def mofo_desel_block (start, end):
+  current_ea = start
+  while current_ea < end:
+    idaapi.set_item_color (current_ea, idc.DEFCOLOR)
+    current_ea = mofo_get_next_insn (current_ea, 1)
 
 # -------------------------------------------------------------------
 class mofoscator_gui (QtGui.QWidget):
@@ -1261,6 +1416,13 @@ class mofoscator_gui (QtGui.QWidget):
     self.movdata.setHorizontalHeader (hheader)
     self.movdata.setHorizontalHeaderLabels (['movfuscator data', 'address'])
     self.movdata.setEditTriggers (QtGui.QAbstractItemView.NoEditTriggers)
+
+    movfuncs_sel = self.movfuncs.selectionModel ()
+    movfuncs_sel.selectionChanged.connect (self.mofoscator_gui_sel_func_item)
+
+    movdata_sel = self.movdata.selectionModel ()
+    movdata_sel.selectionChanged.connect (self.mofoscator_gui_sel_data_item)
+
     self.codestart_edit = QtGui.QLineEdit ()
     self.codeend_edit = QtGui.QLineEdit ()
     self.datastart_edit = QtGui.QLineEdit ()
@@ -1271,6 +1433,7 @@ class mofoscator_gui (QtGui.QWidget):
     self.nsoftfregs_edit = QtGui.QLineEdit ()
     self.stackthres_edit = QtGui.QLineEdit ()
     self.anal_button = QtGui.QPushButton ('ANALize')
+    self.exp_button = QtGui.QPushButton ('Export as text')
 
     self.labeloffset_edit.setText ('0x%08X' % MOV_OFFSET)
     self.dataalign_edit.setText ('%u' % align)
@@ -1356,7 +1519,12 @@ class mofoscator_gui (QtGui.QWidget):
     grid.addWidget (
         self.anal_button,
         10, 0,
-        1, 2
+        1, 1 
+        )
+    grid.addWidget (
+        self.exp_button,
+        10, 1, 
+        1, 1
         )
     grid.addWidget (
         self.movfuncs,
@@ -1371,6 +1539,8 @@ class mofoscator_gui (QtGui.QWidget):
     grid.setColumnStretch (3, 50)
     self.setLayout (grid)
     self.anal_button.clicked.connect (self.mofoscator_gui_anal)
+    self.exp_button.clicked.connect (self.mofoscator_gui_export)
+    self.exp_button.setEnabled (False)
 
   def mofoscator_gui_add_movfuncs (self, name, start, end):
     self.movfuncs.insertRow (self.movfuncs.rowCount())
@@ -1384,6 +1554,16 @@ class mofoscator_gui (QtGui.QWidget):
     self.movdata.setItem (self.movdata.rowCount()-1, 1, QtGui.QTableWidgetItem ('0x%08X' % start))
 
   def mofoscator_gui_anal (self):
+    global mofo_code_start
+    global mofo_code_end
+    global mofo_data_start
+    global align
+    global MOV_OFFSET
+    global SOFT_I_REGS
+    global SOFT_F_REGS
+    global SOFT_D_REGS
+    global MOV_FLOW
+
     if self.codestart_edit.text () == "":
       print 'please specify the start address of movfuscator\'s code'
       return
@@ -1393,6 +1573,7 @@ class mofoscator_gui (QtGui.QWidget):
     if self.datastart_edit.text () == "":
       print 'please specify the start address of movfuscator\'s data'
       return
+
     mofo_code_start = int (self.codestart_edit.text(), 16)
     mofo_code_end = int (self.codeend_edit.text(), 16)
     mofo_data_start = int (self.datastart_edit.text(), 16)
@@ -1403,9 +1584,13 @@ class mofoscator_gui (QtGui.QWidget):
     SOFT_F_REGS = int (self.nsoftfregs_edit.text())
 
     self.anal_button.setEnabled (False)
+    self.exp_button.setEnabled (True)
+
+    mofo_desel_block (mofo_code_start, mofo_code_end)
 
     mofo_data_anal ()
     mofo_code_anal ()
+    mofo_code_anal_ex ()
 
     for d in mofo_data:
       self.mofoscator_gui_add_movdata (d[0], d[1])
@@ -1430,6 +1615,50 @@ class mofoscator_gui (QtGui.QWidget):
         current_ea = a[1]
       else:
         current_ea = mofo_get_next_insn (current_ea, 1)
+
+  def mofoscator_gui_sel_func_item (self, selected, deselected):
+    if self.movfuncs.selectionModel().currentIndex().column() > 0:
+      row = self.movfuncs.selectionModel().currentIndex().row()
+      mofo_desel_block (self.block_sel_begin, self.block_sel_end)
+      start = int(self.movfuncs.item(row, 1).data(0), 16)
+      end = int(self.movfuncs.item(row, 2).data(0), 16)
+      mofo_sel_block (start, end)
+      self.block_sel_begin = start
+      self.block_sel_end = end
+      idaapi.jumpto (start)
+
+  def mofoscator_gui_sel_data_item (self, selected, deselected):
+    if self.movfuncs.selectionModel().currentIndex().column() > 0:
+      row = self.movdata.selectionModel().currentIndex().row()
+      idaapi.jumpto (int(self.movdata.item(row, 1).data(0), 16))
+
+  def mofoscator_gui_export (self):
+    filename = QtGui.QFileDialog.getSaveFileName ()
+    fdoutput = open (filename[0], 'wb')
+    current_ea = mofo_code_start
+    block_start = current_ea
+    block_end = 0
+    while current_ea < mofo_code_end:
+      f = mofo_is_func (current_ea)
+      if f != None:
+        a = mofo_get_func (current_ea)
+        block_start = current_ea
+        block_end = a[1]
+        stritem = '%s (' % f
+        for n in range (0, len(a[2])):
+          if ((n+1) < len(a[2])):
+            stritem = stritem + a[2][n] + ', '
+          else:
+            stritem = stritem + a[2][n]
+        stritem = stritem + ');'
+        fdoutput.write ('/* 0x%08X */ %s\n' % (block_start, stritem))
+        current_ea = a[1]
+      else:
+        current_ea = mofo_get_next_insn (current_ea, 1)
+    fdoutput.close ()
+    print 'The file has been exported'
+
+
 
 
 mofogui = mofoscator_gui ()
