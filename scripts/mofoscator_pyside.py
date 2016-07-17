@@ -7,10 +7,16 @@
 #              jmp_lti, jmp_gei, jmp_neu, jmp_geu,
 #              jmp_equ, jmp_ltu, jmp_jumpv, call external
 #    - transfer: mov Rx, select_data
+#    - stack variables
 #    - export as txt
+#    - customizable hl color
 #  todo:
 #    - transfer: store_data
-#    - local variables and parameters
+#    - parameters and local routines
+#  tofix:
+#    - stack variables which are not aligned use alu_add() routine
+#      instead of successive push/pop. Same shit if the stack variables
+#      are located at +/-STACK_EX_THRESH.
 import idaapi
 import idautils
 from PySide import QtGui, QtCore
@@ -33,6 +39,7 @@ SOFT_D_REGS     = 2
 MOV_FLOW        = 1
 MOV_OFFSET      = 0x80000000
 STACK_EX_THRESH = 128*4
+MOFO_HL_BKGD    = 0xFF0000
 
 mofo_funcs      = dict()
 mofo_data       = list()
@@ -1320,10 +1327,12 @@ def mofo_search_stack ():
   refs = DataRefsTo (get_name_ea (NT_NONE, 'frame_ptr'))
   pushpop_addr = get_name_ea (NT_NONE, 'pushpop')
   stack_addr = get_name_ea (NT_NONE, 'stack_00000000')
-  push_val = stack_addr - pushpop_addr - 4
-  pop_val  = stack_addr - pushpop_addr + 4
+  push_val = (pushpop_addr - stack_addr - 4)*(-1)
+  pop_val  = (pushpop_addr - stack_addr + 4)*(-1)
   push_str = '%x' % push_val
   pop_str = '%x' % pop_val
+  print push_str
+  print pop_str
   nbytes = 0
   for r in refs:
     if mofo_is_func (r) != None:
@@ -1341,7 +1350,16 @@ def mofo_search_stack ():
           nbytes = nbytes + 4
         else:
           break
-      mofo_update_funcs ('alu_sub', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
+      if GetOpnd (current_ea, 0) == "edx" and GetOpnd (current_ea, 1) == "on":
+        end_block = mofo_get_next_insn (current_ea, 4)
+        val = GetOpnd (mofo_get_next_insn (current_ea, 3), 1)
+        mofo_update_funcs ('mov', r, end_block, ['*(frame_ptr - 0x%08X)' % nbytes, '%s' % val])
+      elif GetOpnd (current_ea, 0)[0] == 'R' and GetOpnd (current_ea, 1) == 'eax':
+        end_block = mofo_get_next_insn (current_ea, 7)
+        val = GetOpnd (mofo_get_next_insn (current_ea, 6), 0)
+        mofo_update_funcs ('mov', r, end_block, ['%s' % val, '*(frame_ptr - 0x%08X)' % nbytes])
+      else:
+        mofo_update_funcs ('alu_sub', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
     elif opnd.find (pop_str) != -1:
       while True:
         current_ea = mofo_get_next_insn (current_ea, 1)
@@ -1422,7 +1440,7 @@ def mofo_code_anal_ex ():
 def mofo_sel_block (start, end):
   current_ea = start
   while current_ea < end:
-    idaapi.set_item_color (current_ea, 0xFF0000)
+    idaapi.set_item_color (current_ea, MOFO_HL_BKGD)
     current_ea = mofo_get_next_insn (current_ea, 1)
 
 # -------------------------------------------------------------------
@@ -1472,6 +1490,7 @@ class mofoscator_gui (QtGui.QWidget):
     self.nsoftdregs_edit = QtGui.QLineEdit ()
     self.nsoftfregs_edit = QtGui.QLineEdit ()
     self.stackthres_edit = QtGui.QLineEdit ()
+    self.hlcolor_edit    = QtGui.QLineEdit ()
     self.anal_button = QtGui.QPushButton ('ANALize')
     self.exp_button = QtGui.QPushButton ('Export as text')
 
@@ -1481,6 +1500,7 @@ class mofoscator_gui (QtGui.QWidget):
     self.nsoftdregs_edit.setText ('%u' % SOFT_D_REGS)
     self.nsoftfregs_edit.setText ('%u' % SOFT_F_REGS)
     self.stackthres_edit.setText ('0x%08X' % STACK_EX_THRESH)
+    self.hlcolor_edit.setText ('0x%08X' % MOFO_HL_BKGD)
 
     grid = QtGui.QGridLayout ()
     grid.setSpacing (5)
@@ -1557,24 +1577,32 @@ class mofoscator_gui (QtGui.QWidget):
         9, 1
         )
     grid.addWidget (
+        QtGui.QLabel ('highlight color'),
+        10, 0
+        )
+    grid.addWidget (
+        self.hlcolor_edit,
+        10, 1,
+        )
+    grid.addWidget (
         self.anal_button,
-        10, 0,
+        11, 0,
         1, 1 
         )
     grid.addWidget (
         self.exp_button,
-        10, 1, 
+        11, 1, 
         1, 1
         )
     grid.addWidget (
         self.movfuncs,
         1, 3,
-        10, 1
+        11, 1
         )
     grid.addWidget (
         self.movdata,
         1, 2,
-        10, 1
+        11, 1
         )
     grid.setColumnStretch (3, 50)
     self.setLayout (grid)
@@ -1603,6 +1631,7 @@ class mofoscator_gui (QtGui.QWidget):
     global SOFT_F_REGS
     global SOFT_D_REGS
     global MOV_FLOW
+    global MOFO_HL_BKGD
 
     if self.codestart_edit.text () == "":
       print 'please specify the start address of movfuscator\'s code'
@@ -1622,6 +1651,7 @@ class mofoscator_gui (QtGui.QWidget):
     SOFT_I_REGS = int (self.nsoftiregs_edit.text())
     SOFT_D_REGS = int (self.nsoftdregs_edit.text())
     SOFT_F_REGS = int (self.nsoftfregs_edit.text())
+    MOFO_HL_BKGD = int (self.hlcolor_edit.text(), 16)
 
     self.anal_button.setEnabled (False)
     self.exp_button.setEnabled (True)
