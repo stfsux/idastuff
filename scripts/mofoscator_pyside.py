@@ -521,6 +521,37 @@ xref_code_sign = [
     14,
   ],
   [
+    'movsx16',
+    'alu_sex8',
+    [
+      [REL_PREV, 1, OP_REG, 0, 'al'],
+      [REL_PREV, 1, OP_REG, 1, 'dh'],
+      [REL_PREV, 2, OP_REG, 0, 'eax'],
+      [REL_PREV, 2, OP_VAL, 1, 0]
+    ],
+    [
+      [REL_PREV, 3, 1, OP_SRC],
+      [REL_NEXT, 2, 0, OP_DST]
+    ],
+    2,
+    1,
+  ],
+  [
+    'movsx8',
+    'alu_sex8',
+    [
+      [REL_PREV, 2, OP_REG, 0, 'edx'],
+      [REL_PREV, 2, OP_VAL, 1, 0],
+    ],
+    [
+      [REL_PREV, 1, 1, OP_SRC],
+      [REL_NEXT, 1, 0, OP_DST]
+    ],
+    2,
+    1,
+  ],
+
+  [
     'select_data',
     'data_p',
     [
@@ -1320,7 +1351,16 @@ def mofo_search_stack ():
           nbytes = nbytes + 4
         else:
           break
-      mofo_update_funcs ('alu_add', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
+      if GetOpnd (current_ea, 0) == "edx" and GetOpnd (current_ea, 1) == "on":
+        end_block = mofo_get_next_insn (current_ea, 4)
+        val = GetOpnd (mofo_get_next_insn (current_ea, 3), 1)
+        mofo_update_funcs ('mov', r, end_block, ['*(frame_ptr + 0x%08X)' % nbytes, '%s' % val])
+      elif GetOpnd (current_ea, 0)[0] == 'R' and GetOpnd (current_ea, 1) == 'eax':
+        end_block = mofo_get_next_insn (current_ea, 7)
+        val = GetOpnd (mofo_get_next_insn (current_ea, 6), 0)
+        mofo_update_funcs ('mov', r, end_block, ['%s' % val, '*(frame_ptr + 0x%08X)' % nbytes])
+      else:
+        mofo_update_funcs ('alu_add', r, current_ea, ['frame_ptr', '0x%08X' % nbytes, 'eax'])
 
 # -------------------------------------------------------------------
 def mofo_search_movreg ():
@@ -1334,7 +1374,7 @@ def mofo_search_movreg ():
       end = mofo_get_next_insn (r, 1)
       if GetOpType (r, 1) == o_imm:
         op1 = GetOpnd (r, 1)
-        mofo_update_funcs ('mov', r, r, ['R%1d' % n, op1])
+        mofo_update_funcs ('mov', r, end, ['R%1d' % n, op1])
       elif GetOpType (r, 1) == o_reg:
         op1 = GetOpnd (r, 1)
         opaxx = mofo_get_reg_wr_ea (r, op1)
